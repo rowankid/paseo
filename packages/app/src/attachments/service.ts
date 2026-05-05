@@ -1,5 +1,10 @@
 import type { AttachmentMetadata } from "@/attachments/types";
 import { getAttachmentStore } from "@/attachments/store";
+import type { AgentAttachment } from "@server/shared/messages";
+
+function formatAttachmentFileName(attachment: AttachmentMetadata): string {
+  return attachment.fileName?.trim() || attachment.id;
+}
 
 export async function persistAttachmentFromBlob(input: {
   blob: Blob;
@@ -91,6 +96,49 @@ export async function encodeAttachmentsForSend(
     (entry): entry is { data: string; mimeType: string } => entry !== null,
   );
   return valid.length > 0 ? valid : undefined;
+}
+
+export async function encodeFileAttachmentsForUpload(
+  attachments: readonly AttachmentMetadata[] | undefined,
+): Promise<AgentAttachment[]> {
+  if (!attachments || attachments.length === 0) {
+    return [];
+  }
+
+  const store = await getAttachmentStore();
+  const encoded = await Promise.all(
+    attachments.map(async (attachment) => {
+      try {
+        const base64 = await store.encodeBase64({ attachment });
+        return {
+          type: "file_upload",
+          mimeType: attachment.mimeType,
+          fileName: formatAttachmentFileName(attachment),
+          data: base64,
+          byteSize: attachment.byteSize ?? null,
+        } satisfies AgentAttachment;
+      } catch (error) {
+        console.error("[attachments] Failed to encode file attachment for send", {
+          id: attachment.id,
+          error,
+        });
+        return {
+          type: "text",
+          mimeType: "text/plain",
+          title: `File · ${formatAttachmentFileName(attachment)}`,
+          text: [
+            `Attached file: ${formatAttachmentFileName(attachment)}`,
+            `MIME type: ${attachment.mimeType}`,
+            `Size: ${attachment.byteSize ?? "unknown"} bytes`,
+            "",
+            "Paseo could not read this file before sending it.",
+          ].join("\n"),
+        } satisfies AgentAttachment;
+      }
+    }),
+  );
+
+  return encoded;
 }
 
 export async function resolveAttachmentPreviewUrl(attachment: AttachmentMetadata): Promise<string> {

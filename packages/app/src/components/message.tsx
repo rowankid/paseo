@@ -430,6 +430,8 @@ function getUserMessageAttachmentLabel(attachment: AgentAttachment): string {
       return `Issue #${attachment.number}`;
     case "text":
       return attachment.title ?? "Text attachment";
+    case "file_upload":
+      return attachment.fileName ? `File · ${attachment.fileName}` : "File attachment";
     default:
       return "";
   }

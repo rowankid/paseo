@@ -11,13 +11,20 @@ export type ImageAttachment = AttachmentMetadata;
 export function splitComposerAttachmentsForSubmit(attachments: ComposerAttachment[]): {
   images: ImageAttachment[];
   attachments: AgentAttachment[];
+  files: AttachmentMetadata[];
 } {
   const images: ImageAttachment[] = [];
   const reviewAttachments: AgentAttachment[] = [];
+  const files: AttachmentMetadata[] = [];
 
   for (const attachment of attachments) {
     if (attachment.kind === "image") {
       images.push(attachment.metadata);
+      continue;
+    }
+
+    if (attachment.kind === "file") {
+      files.push(attachment.metadata);
       continue;
     }
 
@@ -38,5 +45,23 @@ export function splitComposerAttachmentsForSubmit(attachments: ComposerAttachmen
   return {
     images,
     attachments: reviewAttachments,
+    files,
+  };
+}
+
+export async function resolveComposerAttachmentsForSubmit(
+  attachments: ComposerAttachment[],
+  input: {
+    encodeFiles: (files: AttachmentMetadata[]) => Promise<AgentAttachment[]>;
+  },
+): Promise<{
+  images: ImageAttachment[];
+  attachments: AgentAttachment[];
+}> {
+  const split = splitComposerAttachmentsForSubmit(attachments);
+  const fileAttachments = await input.encodeFiles(split.files);
+  return {
+    images: split.images,
+    attachments: [...split.attachments, ...fileAttachments],
   };
 }

@@ -1,7 +1,11 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { AttachmentMetadata, AttachmentStore, SaveAttachmentInput } from "@/attachments/types";
 import { __setAttachmentStoreForTests } from "./store";
-import { encodeAttachmentsForSend, persistAttachmentFromBytes } from "./service";
+import {
+  encodeAttachmentsForSend,
+  encodeFileAttachmentsForUpload,
+  persistAttachmentFromBytes,
+} from "./service";
 
 function createAttachment(input: Partial<AttachmentMetadata> = {}): AttachmentMetadata {
   return {
@@ -18,14 +22,17 @@ function createAttachment(input: Partial<AttachmentMetadata> = {}): AttachmentMe
 function createRecordingStore(): AttachmentStore & {
   savedSources: SaveAttachmentInput[];
   releasedUrls: string[];
+  encodedBase64ById: Map<string, string>;
 } {
   const savedSources: SaveAttachmentInput[] = [];
   const releasedUrls: string[] = [];
+  const encodedBase64ById = new Map<string, string>();
 
   return {
     storageType: "web-indexeddb",
     savedSources,
     releasedUrls,
+    encodedBase64ById,
     async save(input) {
       savedSources.push(input);
       return createAttachment({
@@ -36,7 +43,7 @@ function createRecordingStore(): AttachmentStore & {
       });
     },
     async encodeBase64({ attachment }) {
-      return `${attachment.id}:base64`;
+      return encodedBase64ById.get(attachment.id) ?? `${attachment.id}:base64`;
     },
     async resolvePreviewUrl({ attachment }) {
       return `blob:${attachment.id}`;
@@ -92,6 +99,54 @@ describe("attachment service", () => {
 
     await expect(encodeAttachmentsForSend([attachment])).resolves.toEqual([
       { data: "att_send:base64", mimeType: "image/jpeg" },
+    ]);
+  });
+
+  it("encodes text files as upload attachments without inlining prompt text", async () => {
+    const store = createRecordingStore();
+    store.encodedBase64ById.set("att_file", Buffer.from("hello from file\n").toString("base64"));
+    __setAttachmentStoreForTests(store);
+    const attachment = createAttachment({
+      id: "att_file",
+      mimeType: "text/plain",
+      fileName: "notes.txt",
+      byteSize: 16,
+    });
+
+    await expect(encodeFileAttachmentsForUpload([attachment])).resolves.toEqual([
+      {
+        type: "file_upload",
+        mimeType: "text/plain",
+        fileName: "notes.txt",
+        data: Buffer.from("hello from file\n").toString("base64"),
+        byteSize: 16,
+      },
+    ]);
+  });
+
+  it("encodes large binary files as upload attachments", async () => {
+    const store = createRecordingStore();
+    const bytes = Buffer.alloc(300_000);
+    bytes[0] = 0;
+    bytes[1] = 255;
+    bytes[299_999] = 127;
+    store.encodedBase64ById.set("att_binary", bytes.toString("base64"));
+    __setAttachmentStoreForTests(store);
+    const attachment = createAttachment({
+      id: "att_binary",
+      mimeType: "application/octet-stream",
+      fileName: "archive.bin",
+      byteSize: bytes.byteLength,
+    });
+
+    await expect(encodeFileAttachmentsForUpload([attachment])).resolves.toEqual([
+      {
+        type: "file_upload",
+        mimeType: "application/octet-stream",
+        fileName: "archive.bin",
+        data: bytes.toString("base64"),
+        byteSize: bytes.byteLength,
+      },
     ]);
   });
 });

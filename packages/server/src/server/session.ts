@@ -64,6 +64,7 @@ import {
   toAgentPersistenceHandle,
 } from "./persistence-hooks.js";
 import { ensureAgentLoaded } from "./agent/agent-loading.js";
+import { materializeFileUploadAttachments } from "./agent/file-upload-attachments.js";
 import { sendPromptToAgent, unarchiveAgentState } from "./agent/mcp-shared.js";
 import { experimental_createMCPClient } from "ai";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
@@ -1082,6 +1083,29 @@ export class Session {
       blocks.push(attachment);
     }
     return blocks;
+  }
+
+  private async resolveAgentCwd(agentId: string): Promise<string> {
+    const live = this.agentManager.getAgent(agentId);
+    if (live) {
+      return live.cwd;
+    }
+    const stored = await this.agentStorage.get(agentId);
+    if (stored) {
+      return stored.cwd;
+    }
+    throw new Error(`Agent ${agentId} not found`);
+  }
+
+  private async materializeAttachmentsForAgent(
+    agentId: string,
+    attachments: AgentAttachment[] | undefined,
+  ): Promise<AgentAttachment[] | undefined> {
+    if (!attachments || attachments.length === 0) {
+      return attachments;
+    }
+    const cwd = await this.resolveAgentCwd(agentId);
+    return await materializeFileUploadAttachments({ cwd, attachments });
   }
 
   /**
@@ -2930,10 +2954,13 @@ export class Session {
       }`,
     );
 
-    const promptText = options?.spokenInput ? wrapSpokenInput(text) : text;
-    const prompt = this.buildAgentPrompt(promptText, images, attachments);
-
     try {
+      const materializedAttachments = await this.materializeAttachmentsForAgent(
+        agentId,
+        attachments,
+      );
+      const promptText = options?.spokenInput ? wrapSpokenInput(text) : text;
+      const prompt = this.buildAgentPrompt(promptText, images, materializedAttachments);
       await sendPromptToAgent({
         agentManager: this.agentManager,
         agentStorage: this.agentStorage,
@@ -7305,7 +7332,11 @@ export class Session {
     try {
       const agentId = resolved.agentId;
 
-      const prompt = this.buildAgentPrompt(msg.text, msg.images, msg.attachments);
+      const materializedAttachments = await this.materializeAttachmentsForAgent(
+        agentId,
+        msg.attachments,
+      );
+      const prompt = this.buildAgentPrompt(msg.text, msg.images, materializedAttachments);
       this.sessionLogger.trace(
         { agentId, messageId: msg.messageId, textPrefix: msg.text.slice(0, 80) },
         "send_agent_message_request: dispatching shared sendPromptToAgent",

@@ -13,7 +13,8 @@ import { useWorkspaceSetupStore } from "@/stores/workspace-setup-store";
 import { normalizeAgentSnapshot } from "@/utils/agent-snapshots";
 import { encodeImages } from "@/utils/encode-images";
 import { toErrorMessage } from "@/utils/error-messages";
-import { splitComposerAttachmentsForSubmit } from "@/components/composer-attachments";
+import { encodeFileAttachmentsForUpload } from "@/attachments/service";
+import { resolveComposerAttachmentsForSubmit } from "@/components/composer-attachments";
 import type { CreateAgentRequestOptions, DaemonClient } from "@server/client/daemon-client";
 import { projectIconPlaceholderLabelFromDisplayName } from "@/utils/project-display-name";
 import { requireWorkspaceExecutionAuthority } from "@/utils/workspace-execution";
@@ -275,7 +276,9 @@ export function WorkspaceSetupDialog() {
           throw new Error("Select a model");
         }
 
-        const wirePayload = splitComposerAttachmentsForSubmit(attachments);
+        const wirePayload = await resolveComposerAttachmentsForSubmit(attachments, {
+          encodeFiles: encodeFileAttachmentsForUpload,
+        });
         const encodedImages = await encodeImages(wirePayload.images);
         const workspaceDirectory = requireWorkspaceExecutionAuthority({
           workspace: ensuredWorkspace,

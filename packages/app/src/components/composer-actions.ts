@@ -8,9 +8,12 @@ import {
   isWorkspaceAttachment,
   userAttachmentsOnly,
 } from "@/attachments/workspace-attachment-utils";
-import { splitComposerAttachmentsForSubmit } from "@/components/composer-attachments";
+import { encodeFileAttachmentsForUpload } from "@/attachments/service";
+import { resolveComposerAttachmentsForSubmit } from "@/components/composer-attachments";
+import type { AgentAttachment } from "@server/shared/messages";
 import { generateMessageId, type StreamItem } from "@/types/stream";
 import type { PickedImageAttachmentInput } from "@/hooks/image-attachment-picker";
+import type { PickedFileAttachmentInput } from "@/hooks/file-attachment-picker";
 
 export interface QueuedComposerMessage {
   id: string;
@@ -39,7 +42,7 @@ export interface ComposerSendClient {
     options: {
       messageId: string;
       images: Array<{ data: string; mimeType: string }>;
-      attachments: ReturnType<typeof splitComposerAttachmentsForSubmit>["attachments"];
+      attachments: AgentAttachment[];
     },
   ) => Promise<void>;
 }
@@ -87,13 +90,39 @@ export async function pickAndPersistImages(input: {
   );
 }
 
+export async function pickAndPersistFiles(input: {
+  pickFiles: () => Promise<PickedFileAttachmentInput[] | null>;
+  persister: Pick<AttachmentPersister, "persistFromBlob" | "persistFromFileUri">;
+}): Promise<AttachmentMetadata[]> {
+  const result = await input.pickFiles();
+  if (!result?.length) return [];
+  return await Promise.all(
+    result.map(async (picked) => {
+      const fileName = picked.fileName ?? null;
+      const mimeType = picked.mimeType || "application/octet-stream";
+      if (picked.source.kind === "blob") {
+        return await input.persister.persistFromBlob({
+          blob: picked.source.blob,
+          mimeType,
+          fileName,
+        });
+      }
+      return await input.persister.persistFromFileUri({
+        uri: picked.source.uri,
+        mimeType,
+        fileName,
+      });
+    }),
+  );
+}
+
 export function removeComposerAttachmentAtIndex<T extends ComposerAttachment>(input: {
   attachments: T[];
   index: number;
   deleteAttachments: AttachmentPersister["deleteAttachments"];
 }): T[] {
   const removed = input.attachments[input.index];
-  if (removed?.kind === "image") {
+  if (removed?.kind === "image" || removed?.kind === "file") {
     void input.deleteAttachments([removed.metadata]);
   }
   return input.attachments.filter((_, i) => i !== input.index);
@@ -128,7 +157,9 @@ export interface DispatchComposerAgentMessageInput {
 export async function dispatchComposerAgentMessage(
   input: DispatchComposerAgentMessageInput,
 ): Promise<void> {
-  const wirePayload = splitComposerAttachmentsForSubmit(input.attachments);
+  const wirePayload = await resolveComposerAttachmentsForSubmit(input.attachments, {
+    encodeFiles: encodeFileAttachmentsForUpload,
+  });
   const messageId = generateMessageId();
   const userMessage: StreamItem = {
     kind: "user_message",
@@ -280,6 +311,9 @@ export function openComposerAttachment(input: OpenComposerAttachmentInput): void
     input.setLightboxMetadata(input.attachment.metadata);
     return;
   }
+  if (input.attachment.kind === "file") {
+    return;
+  }
   if (isWorkspaceAttachment(input.attachment)) {
     input.openWorkspaceAttachment({ attachment: input.attachment });
     return;
@@ -297,6 +331,7 @@ export function toggleGithubAttachment(
 ): UserComposerAttachment[] {
   const matches = (attachment: UserComposerAttachment) =>
     attachment.kind !== "image" &&
+    attachment.kind !== "file" &&
     attachment.item.kind === item.kind &&
     attachment.item.number === item.number;
   if (current.some(matches)) {
@@ -319,6 +354,7 @@ export function isAttachmentSelectedForGithubItem(
   return userAttachmentsOnly(current).some(
     (attachment) =>
       attachment.kind !== "image" &&
+      attachment.kind !== "file" &&
       attachment.item.kind === item.kind &&
       attachment.item.number === item.number,
   );

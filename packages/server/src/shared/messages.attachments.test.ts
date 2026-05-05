@@ -226,6 +226,34 @@ describe("shared messages attachments", () => {
     ]);
   });
 
+  it("keeps file upload attachments for server-side materialization", () => {
+    const parsed = SendAgentMessageRequestSchema.parse({
+      type: "send_agent_message_request",
+      requestId: "req-file-upload",
+      agentId: "agent-1",
+      text: "Please inspect this binary.",
+      attachments: [
+        {
+          type: "file_upload",
+          mimeType: "application/octet-stream",
+          fileName: "large.bin",
+          data: Buffer.from(new Uint8Array([0, 1, 2, 255])).toString("base64"),
+          byteSize: 4,
+        },
+      ],
+    });
+
+    expect(parsed.attachments).toEqual([
+      {
+        type: "file_upload",
+        mimeType: "application/octet-stream",
+        fileName: "large.bin",
+        data: "AAEC/w==",
+        byteSize: 4,
+      },
+    ]);
+  });
+
   it("keeps known firstAgentContext attachments and drops unknown ones", () => {
     const parsed = CreatePaseoWorktreeRequestSchema.parse({
       type: "create_paseo_worktree_request",
