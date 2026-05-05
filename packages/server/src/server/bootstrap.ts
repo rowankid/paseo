@@ -135,6 +135,7 @@ import { ScriptHealthMonitor } from "./script-health-monitor.js";
 import { createScriptStatusEmitter } from "./script-status-projection.js";
 import { WorkspaceScriptRuntimeStore } from "./workspace-script-runtime-store.js";
 import { isHostnameAllowed, type HostnamesConfig } from "./hostnames.js";
+import { isOriginAllowedByList } from "./origin-allowlist.js";
 import { createRequireBearerMiddleware, type DaemonAuthConfig } from "./auth.js";
 
 type AgentMcpTransportMap = Map<string, StreamableHTTPServerTransport>;
@@ -313,7 +314,7 @@ export async function createPaseoDaemon(
 
   app.use((req, res, next) => {
     const origin = req.headers.origin;
-    if (origin && (allowedOrigins.has("*") || allowedOrigins.has(origin))) {
+    if (origin && isOriginAllowedByList(origin, allowedOrigins)) {
       res.setHeader("Access-Control-Allow-Origin", origin);
       res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
       res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");

@@ -58,6 +58,7 @@ import {
   isBearerTokenValid,
   type DaemonAuthConfig,
 } from "./auth.js";
+import { isOriginAllowedByList } from "./origin-allowlist.js";
 
 const WS_CLOSE_DAEMON_AUTH_FAILED = 4401;
 
@@ -627,7 +628,7 @@ export class VoiceAssistantWebSocketServer {
       !!requestHost &&
       (origin === `http://${requestHost}` || origin === `https://${requestHost}`);
 
-    if (!origin || allowedOrigins.has("*") || allowedOrigins.has(origin) || sameOrigin) {
+    if (!origin || isOriginAllowedByList(origin, allowedOrigins) || sameOrigin) {
       callback(true);
     } else {
       this.incrementRuntimeCounter("originRejected");

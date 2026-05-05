@@ -95,7 +95,6 @@ import {
 import type { ListTerminalsResponse } from "@server/shared/messages";
 import { upsertTerminalListEntry } from "@/utils/terminal-list";
 import { confirmDialog } from "@/utils/confirm-dialog";
-import { useArchiveAgent } from "@/hooks/use-archive-agent";
 import { useStableEvent } from "@/hooks/use-stable-event";
 import { createWorkspaceBrowser, useBrowserStore } from "@/stores/browser-store";
 import { getDesktopHost } from "@/desktop/host";
@@ -1500,8 +1499,6 @@ function WorkspaceScreenContent({
       return payload;
     },
   });
-  const { archiveAgent } = useArchiveAgent();
-
   useEffect(() => {
     if (!isRouteFocused || !client || !isConnected || !workspaceDirectory) {
       return;
@@ -2246,28 +2243,6 @@ function WorkspaceScreenContent({
     async (input: { tabId: string; agentId: string }) => {
       const { tabId, agentId } = input;
       await closeTab(tabId, async () => {
-        if (!normalizedServerId) {
-          return;
-        }
-
-        const agent =
-          useSessionStore.getState().sessions[normalizedServerId]?.agents?.get(agentId) ?? null;
-        const isRunning = agent?.status === "running" || agent?.status === "initializing";
-
-        if (isRunning) {
-          const confirmed = await confirmDialog({
-            title: "Archive running agent?",
-            message:
-              "This agent is still running. Archiving it will stop the agent and close the tab.",
-            confirmLabel: "Archive",
-            cancelLabel: "Cancel",
-            destructive: true,
-          });
-          if (!confirmed) {
-            return;
-          }
-        }
-
         setHoveredTabKey((current) => (current === tabId ? null : current));
         setHoveredCloseTabKey((current) => (current === tabId ? null : current));
         if (persistenceKey) {
@@ -2276,12 +2251,9 @@ function WorkspaceScreenContent({
             target: { kind: "agent", agentId },
           });
         }
-
-        // Errors (e.g. timeout) are handled by the mutation's onSettled callback
-        void archiveAgent({ serverId: normalizedServerId, agentId }).catch(() => {});
       });
     },
-    [archiveAgent, closeTab, closeWorkspaceTabWithCleanup, normalizedServerId, persistenceKey],
+    [closeTab, closeWorkspaceTabWithCleanup, persistenceKey],
   );
 
   const handleCloseDraftOrFileTab = useCallback(

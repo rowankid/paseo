@@ -1547,6 +1547,16 @@ export const FileDownloadTokenRequestSchema = z.object({
   requestId: z.string(),
 });
 
+export const WorkspaceFileSaveRequestSchema = z.object({
+  type: z.literal("workspace_file_save_request"),
+  cwd: z.string(),
+  path: z.string(),
+  contentBase64: z.string(),
+  requestId: z.string(),
+  expectedModifiedAt: z.string().optional(),
+  expectedSize: z.number().optional(),
+});
+
 export const ClearAgentAttentionMessageSchema = z.object({
   type: z.literal("clear_agent_attention"),
   agentId: z.union([z.string(), z.array(z.string())]),
@@ -1749,6 +1759,7 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   FileExplorerRequestSchema,
   ProjectIconRequestSchema,
   FileDownloadTokenRequestSchema,
+  WorkspaceFileSaveRequestSchema,
   ClearAgentAttentionMessageSchema,
   ClientHeartbeatMessageSchema,
   PingMessageSchema,
@@ -3063,6 +3074,18 @@ export const FileDownloadTokenResponseSchema = z.object({
   }),
 });
 
+export const WorkspaceFileSaveResponseSchema = z.object({
+  type: z.literal("workspace_file_save_response"),
+  payload: z.object({
+    cwd: z.string(),
+    path: z.string(),
+    size: z.number().nullable(),
+    modifiedAt: z.string().nullable(),
+    error: z.string().nullable(),
+    requestId: z.string(),
+  }),
+});
+
 export const ListProviderModelsResponseMessageSchema = z.object({
   type: z.literal("list_provider_models_response"),
   payload: z.object({
@@ -3363,6 +3386,7 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   FileExplorerResponseSchema,
   ProjectIconResponseSchema,
   FileDownloadTokenResponseSchema,
+  WorkspaceFileSaveResponseSchema,
   ListProviderModelsResponseMessageSchema,
   ListProviderModesResponseMessageSchema,
   ListProviderFeaturesResponseMessageSchema,
@@ -3635,6 +3659,8 @@ export type ProjectIconResponse = z.infer<typeof ProjectIconResponseSchema>;
 export type ProjectIcon = z.infer<typeof ProjectIconSchema>;
 export type FileDownloadTokenRequest = z.infer<typeof FileDownloadTokenRequestSchema>;
 export type FileDownloadTokenResponse = z.infer<typeof FileDownloadTokenResponseSchema>;
+export type WorkspaceFileSaveRequest = z.infer<typeof WorkspaceFileSaveRequestSchema>;
+export type WorkspaceFileSaveResponse = z.infer<typeof WorkspaceFileSaveResponseSchema>;
 export type RestartServerRequestMessage = z.infer<typeof RestartServerRequestMessageSchema>;
 export type ShutdownServerRequestMessage = z.infer<typeof ShutdownServerRequestMessageSchema>;
 export type ClearAgentAttentionMessage = z.infer<typeof ClearAgentAttentionMessageSchema>;

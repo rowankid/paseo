@@ -28,6 +28,7 @@ import {
   Puzzle,
   Plus,
   FolderGit2,
+  Archive,
 } from "lucide-react-native";
 import { SidebarHeaderRow } from "@/components/sidebar/sidebar-header-row";
 import { SidebarSeparator } from "@/components/sidebar/sidebar-separator";
@@ -74,6 +75,7 @@ import { useVoiceAudioEngineOptional } from "@/contexts/voice-context";
 import { HostPage, HostRenameButton } from "@/screens/settings/host-page";
 import ProjectsScreen from "@/screens/projects-screen";
 import ProjectSettingsScreen from "@/screens/project-settings-screen";
+import ArchivedHostSessionsScreen from "@/screens/archived-host-sessions-screen";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { useLocalDaemonServerId } from "@/hooks/use-is-local-daemon";
 import {
@@ -94,6 +96,7 @@ export type SettingsView =
   | { kind: "root" }
   | { kind: "section"; section: SettingsSectionSlug }
   | { kind: "host"; serverId: string }
+  | { kind: "hostArchived"; serverId: string }
   | { kind: "projects" }
   | { kind: "project"; projectKey: string };
 
@@ -724,7 +727,8 @@ function SettingsSidebar({
   const isDesktop = layout === "desktop";
   const containerStyle = isDesktop ? sidebarStyles.desktopContainer : sidebarStyles.mobileContainer;
   const selectedSectionId = view.kind === "section" ? view.section : null;
-  const selectedServerId = view.kind === "host" ? view.serverId : null;
+  const selectedServerId =
+    view.kind === "host" || view.kind === "hostArchived" ? view.serverId : null;
   const isProjectsSelected = view.kind === "projects" || view.kind === "project";
   const paddingTopStyle = useMemo(() => ({ height: padding.top }), [padding.top]);
 
@@ -989,6 +993,9 @@ export default function SettingsScreen({ view }: SettingsScreenProps) {
         titleAccessory: <HostRenameButton host={host} />,
       };
     }
+    if (view.kind === "hostArchived") {
+      return { title: "Archived conversations", Icon: Archive };
+    }
     if (view.kind === "section") {
       const item = SIDEBAR_SECTION_ITEMS.find((s) => s.id === view.section);
       if (!item) return null;
@@ -1003,6 +1010,9 @@ export default function SettingsScreen({ view }: SettingsScreenProps) {
   const content = (() => {
     if (view.kind === "host") {
       return <HostPage serverId={view.serverId} onHostRemoved={handleHostRemoved} />;
+    }
+    if (view.kind === "hostArchived") {
+      return <ArchivedHostSessionsScreen serverId={view.serverId} />;
     }
     if (view.kind === "projects") {
       return <ProjectsScreen view={view} />;
