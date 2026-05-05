@@ -11,6 +11,7 @@ import type {
   SessionOutboundMessage,
 } from "../shared/messages.js";
 import type { WorkspaceGitRuntimeSnapshot } from "./workspace-git-service.js";
+import type { PersistedAgentDescriptor } from "./agent/agent-sdk-types.js";
 import { createNoopWorkspaceGitService } from "./test-utils/workspace-git-service-stub.js";
 import {
   createPersistedProjectRecord,
@@ -27,6 +28,10 @@ interface SessionTestAccess {
   agentStorage: {
     list(...args: unknown[]): Promise<unknown[]>;
     get(agentId: string): Promise<unknown>;
+    upsert(record: unknown): Promise<void>;
+  };
+  agentManager: {
+    listPersistedAgents(...args: unknown[]): Promise<PersistedAgentDescriptor[]>;
   };
   workspaceRegistry: {
     list(...args: unknown[]): Promise<unknown[]>;
@@ -278,6 +283,7 @@ function createSessionForWorkspaceTests(
       agentManager: {
         subscribe: () => () => {},
         listAgents: () => [],
+        listPersistedAgents: async () => [],
         getAgent: () => null,
         archiveAgent: async () => ({ archivedAt: new Date().toISOString() }),
         archiveSnapshot: async () => ({}),
@@ -287,6 +293,7 @@ function createSessionForWorkspaceTests(
       agentStorage: {
         list: async () => [],
         get: async () => null,
+        upsert: async () => {},
       } as unknown as SessionOptions["agentStorage"],
       projectRegistry: {
         initialize: async () => {},
@@ -1435,6 +1442,216 @@ test("active-scoped fetch_agents pages within active scope instead of global his
   expect(firstPage.pageInfo.hasMore).toBe(true);
   expect(agentIdsFromEntries(secondPage.entries)).toEqual(["active-two"]);
   expect(secondPage.pageInfo.hasMore).toBe(false);
+});
+
+test("active-scoped fetch_agents indexes external Codex sessions for open workspaces", async () => {
+  const session = createSessionForWorkspaceTests();
+  const project = createPersistedProjectRecord({
+    projectId: "proj-codex-history",
+    rootPath: "/tmp/codex-history",
+    kind: "non_git",
+    displayName: "codex-history",
+    createdAt: "2026-03-01T12:00:00.000Z",
+    updatedAt: "2026-03-01T12:00:00.000Z",
+  });
+  const workspace = createPersistedWorkspaceRecord({
+    workspaceId: "ws-codex-history",
+    projectId: project.projectId,
+    cwd: "/tmp/codex-history",
+    kind: "directory",
+    displayName: "codex-history",
+    createdAt: "2026-03-01T12:00:00.000Z",
+    updatedAt: "2026-03-01T12:00:00.000Z",
+  });
+  const records = new Map<string, unknown>();
+  const descriptor = {
+    provider: "codex",
+    sessionId: "codex-thread-open-workspace",
+    cwd: workspace.cwd,
+    title: "External Codex session",
+    lastActivityAt: new Date("2026-03-01T12:30:00.000Z"),
+    persistence: {
+      provider: "codex",
+      sessionId: "codex-thread-open-workspace",
+      nativeHandle: "codex-thread-open-workspace",
+      metadata: {
+        provider: "codex",
+        cwd: workspace.cwd,
+        title: "External Codex session",
+        threadId: "codex-thread-open-workspace",
+      },
+    },
+    timeline: [],
+  } satisfies PersistedAgentDescriptor;
+
+  session.projectRegistry.list = async () => [project];
+  session.projectRegistry.get = async () => project;
+  session.workspaceRegistry.list = async () => [workspace];
+  session.agentStorage.list = async () => Array.from(records.values());
+  session.agentStorage.get = async (agentId: string) => records.get(agentId) ?? null;
+  session.agentStorage.upsert = async (record: unknown) => {
+    records.set((record as { id: string }).id, record);
+  };
+  session.agentManager.listPersistedAgents = async () => [
+    descriptor,
+    {
+      ...descriptor,
+      sessionId: "codex-thread-other-workspace",
+      cwd: "/tmp/other-workspace",
+      persistence: {
+        ...descriptor.persistence,
+        sessionId: "codex-thread-other-workspace",
+        nativeHandle: "codex-thread-other-workspace",
+        metadata: {
+          ...descriptor.persistence.metadata,
+          cwd: "/tmp/other-workspace",
+          threadId: "codex-thread-other-workspace",
+        },
+      },
+    },
+  ];
+
+  const result = await session.listFetchAgentsEntries({
+    type: "fetch_agents_request",
+    requestId: "req-codex-history",
+    scope: "active",
+  });
+
+  expect(result.entries).toHaveLength(1);
+  expect(result.entries[0].agent).toEqual(
+    expect.objectContaining({
+      provider: "codex",
+      cwd: workspace.cwd,
+      title: "External Codex session",
+      status: "closed",
+      runtimeInfo: expect.objectContaining({
+        provider: "codex",
+        sessionId: "codex-thread-open-workspace",
+        modeId: "auto",
+      }),
+      persistence: expect.objectContaining({
+        provider: "codex",
+        sessionId: "codex-thread-open-workspace",
+      }),
+    }),
+  );
+  expect((result.entries[0].agent as AgentSnapshotPayload).id).toMatch(
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+  );
+  expect(Array.from(records.values())[0]).toMatchObject({
+    provider: "codex",
+    lastModeId: "auto",
+    config: {
+      modeId: "auto",
+      title: "External Codex session",
+    },
+    runtimeInfo: {
+      provider: "codex",
+      sessionId: "codex-thread-open-workspace",
+      modeId: "auto",
+    },
+  });
+});
+
+test("active-scoped fetch_agents refreshes previously indexed external Codex sessions without mode", async () => {
+  const session = createSessionForWorkspaceTests();
+  const project = createPersistedProjectRecord({
+    projectId: "proj-codex-refresh",
+    rootPath: "/tmp/codex-refresh",
+    kind: "non_git",
+    displayName: "codex-refresh",
+    createdAt: "2026-03-01T12:00:00.000Z",
+    updatedAt: "2026-03-01T12:00:00.000Z",
+  });
+  const workspace = createPersistedWorkspaceRecord({
+    workspaceId: "ws-codex-refresh",
+    projectId: project.projectId,
+    cwd: "/tmp/codex-refresh",
+    kind: "directory",
+    displayName: "codex-refresh",
+    createdAt: "2026-03-01T12:00:00.000Z",
+    updatedAt: "2026-03-01T12:00:00.000Z",
+  });
+  const descriptor = {
+    provider: "codex",
+    sessionId: "codex-thread-needs-mode",
+    cwd: workspace.cwd,
+    title: "Needs mode",
+    lastActivityAt: new Date("2026-03-01T12:30:00.000Z"),
+    persistence: {
+      provider: "codex",
+      sessionId: "codex-thread-needs-mode",
+      nativeHandle: "codex-thread-needs-mode",
+      metadata: {
+        provider: "codex",
+        cwd: workspace.cwd,
+        title: "Needs mode",
+        threadId: "codex-thread-needs-mode",
+      },
+    },
+    timeline: [],
+  } satisfies PersistedAgentDescriptor;
+  const records = new Map<string, unknown>([
+    [
+      "existing-id",
+      {
+        id: "existing-id",
+        provider: "codex",
+        cwd: workspace.cwd,
+        createdAt: "2026-03-01T12:30:00.000Z",
+        updatedAt: "2026-03-01T12:30:00.000Z",
+        lastActivityAt: "2026-03-01T12:30:00.000Z",
+        lastUserMessageAt: null,
+        title: "Needs mode",
+        labels: {},
+        lastStatus: "closed",
+        lastModeId: null,
+        config: { title: "Needs mode" },
+        runtimeInfo: {
+          provider: "codex",
+          sessionId: "codex-thread-needs-mode",
+        },
+        persistence: descriptor.persistence,
+        requiresAttention: false,
+        attentionReason: null,
+        attentionTimestamp: null,
+        archivedAt: null,
+      },
+    ],
+  ]);
+  const upserts: unknown[] = [];
+
+  session.projectRegistry.list = async () => [project];
+  session.projectRegistry.get = async () => project;
+  session.workspaceRegistry.list = async () => [workspace];
+  session.agentStorage.list = async () => Array.from(records.values());
+  session.agentStorage.get = async (agentId: string) => records.get(agentId) ?? null;
+  session.agentStorage.upsert = async (record: unknown) => {
+    upserts.push(record);
+    records.set((record as { id: string }).id, record);
+  };
+  session.agentManager.listPersistedAgents = async () => [descriptor];
+
+  await session.listFetchAgentsEntries({
+    type: "fetch_agents_request",
+    requestId: "req-refresh-codex-mode",
+    scope: "active",
+  });
+
+  expect(upserts).toHaveLength(1);
+  expect(upserts[0]).toMatchObject({
+    provider: "codex",
+    lastModeId: "auto",
+    config: {
+      modeId: "auto",
+      title: "Needs mode",
+    },
+    runtimeInfo: {
+      provider: "codex",
+      sessionId: "codex-thread-needs-mode",
+      modeId: "auto",
+    },
+  });
 });
 
 test("legacy unscoped fetch_agents keeps global workspace behavior", async () => {

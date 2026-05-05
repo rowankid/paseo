@@ -859,6 +859,7 @@ function RootStack() {
       <Stack.Screen name="h/[serverId]/open-project" />
       <Stack.Screen name="h/[serverId]/settings" />
       <Stack.Screen name="settings/hosts/[serverId]" />
+      <Stack.Screen name="settings/hosts/[serverId]/archived" />
     </Stack>
   );
 }

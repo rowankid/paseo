@@ -403,6 +403,14 @@ export function buildSettingsHostRoute(serverId: string) {
   return `/settings/hosts/${encodeSegment(normalized)}` as const;
 }
 
+export function buildSettingsHostArchivedRoute(serverId: string) {
+  const normalized = trimNonEmpty(serverId);
+  if (!normalized) {
+    throw new Error("buildSettingsHostArchivedRoute requires a non-empty serverId");
+  }
+  return `/settings/hosts/${encodeSegment(normalized)}/archived` as const;
+}
+
 export function buildProjectsSettingsRoute() {
   return "/settings/projects" as const;
 }
