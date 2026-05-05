@@ -14,6 +14,7 @@ import {
   findGithubItemByOption,
   isAttachmentSelectedForGithubItem,
   openComposerAttachment,
+  pickAndPersistFiles,
   pickAndPersistImages,
   queueComposerMessage,
   removeComposerAttachmentAtIndex,
@@ -307,6 +308,22 @@ describe("pickAndPersistImages", () => {
   });
 });
 
+describe("pickAndPersistFiles", () => {
+  it("persists file_uri sources with a generic fallback mime type", async () => {
+    const persister = createFakePersister();
+    const result = await pickAndPersistFiles({
+      pickFiles: async () => [
+        { source: { kind: "file_uri", uri: "/tmp/notes" }, mimeType: null, fileName: "notes" },
+      ],
+      persister,
+    });
+    expect(persister.fileUriCalls).toEqual([
+      { uri: "/tmp/notes", mimeType: "application/octet-stream", fileName: "notes" },
+    ]);
+    expect(result).toHaveLength(1);
+  });
+});
+
 describe("dispatchComposerAgentMessage", () => {
   it("sends text + image data + structured attachments and appends user_message to the tail when head is empty", async () => {
     const client = createFakeSendClient();
@@ -594,6 +611,18 @@ describe("removeComposerAttachmentAtIndex", () => {
     });
     expect(next).toEqual([]);
     expect(persister.deletedBatches).toEqual([[image]]);
+  });
+
+  it("removes a file attachment and asks the persister to delete the underlying metadata", () => {
+    const file = { ...imageMetadata, id: "file-remove", mimeType: "text/plain" };
+    const persister = createFakePersister();
+    const next = removeComposerAttachmentAtIndex({
+      attachments: [{ kind: "file", metadata: file }] satisfies UserComposerAttachment[],
+      index: 0,
+      deleteAttachments: persister.deleteAttachments,
+    });
+    expect(next).toEqual([]);
+    expect(persister.deletedBatches).toEqual([[file]]);
   });
 
   it("removes a github attachment without scheduling any storage deletes", () => {

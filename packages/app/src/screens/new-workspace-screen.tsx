@@ -8,7 +8,8 @@ import { createNameId } from "mnemonic-id";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronDown, GitBranch, GitPullRequest } from "lucide-react-native";
 import { Composer } from "@/components/composer";
-import { splitComposerAttachmentsForSubmit } from "@/components/composer-attachments";
+import { encodeFileAttachmentsForUpload } from "@/attachments/service";
+import { resolveComposerAttachmentsForSubmit } from "@/components/composer-attachments";
 import { FileDropZone } from "@/components/file-drop-zone";
 import { Combobox, ComboboxItem } from "@/components/ui/combobox";
 import type { ComboboxOption as ComboboxOptionType } from "@/components/ui/combobox";
@@ -283,7 +284,12 @@ async function runCreateChatAgent(input: CreateChatAgentInput): Promise<void> {
   if (!provider) {
     throw new Error("Select a model");
   }
-  const { attachments: reviewAttachments } = splitComposerAttachmentsForSubmit(attachments);
+  const { attachments: reviewAttachments } = await resolveComposerAttachmentsForSubmit(
+    attachments,
+    {
+      encodeFiles: encodeFileAttachmentsForUpload,
+    },
+  );
   const ensuredWorkspace = await ensureWorkspace({
     cwd,
     prompt: text,

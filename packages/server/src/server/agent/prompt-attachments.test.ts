@@ -96,6 +96,18 @@ describe("prompt attachments", () => {
     ).toBe("<browser-element>button.primary</browser-element>");
   });
 
+  it("renders file upload attachments without embedding file bytes", () => {
+    expect(
+      renderPromptAttachmentAsText({
+        type: "file_upload",
+        mimeType: "application/octet-stream",
+        fileName: "large.bin",
+        data: Buffer.alloc(300_000).toString("base64"),
+        byteSize: 300_000,
+      }),
+    ).toBe("Attached file: large.bin (application/octet-stream)");
+  });
+
   it("returns undefined when firstAgentContext is empty", () => {
     expect(buildAgentBranchNameSeed(undefined)).toBeUndefined();
     expect(buildAgentBranchNameSeed({})).toBeUndefined();

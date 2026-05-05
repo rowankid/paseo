@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useReducer } from "react";
 import type { ComposerAttachment } from "@/attachments/types";
-import { splitComposerAttachmentsForSubmit } from "@/components/composer-attachments";
+import { encodeFileAttachmentsForUpload } from "@/attachments/service";
+import { resolveComposerAttachmentsForSubmit } from "@/components/composer-attachments";
 import { useCreateFlowStore } from "@/stores/create-flow-store";
 import {
   generateMessageId,
@@ -157,7 +158,9 @@ export function useDraftAgentCreateFlow<TDraftAgent, TCreateResult>({
       }
 
       dispatch({ type: "DRAFT_SET_ERROR", message: "" });
-      const wirePayload = splitComposerAttachmentsForSubmit(attachments);
+      const wirePayload = await resolveComposerAttachmentsForSubmit(attachments, {
+        encodeFiles: encodeFileAttachmentsForUpload,
+      });
       const images = wirePayload.images;
 
       const trimmedPrompt = text.trim();

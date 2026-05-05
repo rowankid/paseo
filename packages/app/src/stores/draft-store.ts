@@ -135,7 +135,7 @@ function isUserComposerAttachment(value: unknown): value is UserComposerAttachme
     return false;
   }
   const record = value as Record<string, unknown>;
-  if (record.kind === "image") {
+  if (record.kind === "image" || record.kind === "file") {
     const metadata = record.metadata;
     return isAttachmentMetadata(metadata);
   }
@@ -146,9 +146,9 @@ function isUserComposerAttachment(value: unknown): value is UserComposerAttachme
 }
 
 function normalizeComposerAttachment(attachment: UserComposerAttachment): UserComposerAttachment {
-  if (attachment.kind === "image") {
+  if (attachment.kind === "image" || attachment.kind === "file") {
     return {
-      kind: "image",
+      kind: attachment.kind,
       metadata: normalizeAttachmentMetadata(attachment.metadata),
     };
   }
@@ -211,7 +211,7 @@ function collectReferencedAttachmentIdsFromState(state: DraftStoreState): Set<st
       continue;
     }
     for (const attachment of draftRecord.input.attachments) {
-      if (attachment.kind === "image") {
+      if (attachment.kind === "image" || attachment.kind === "file") {
         referencedIds.add(attachment.metadata.id);
       }
     }
@@ -220,7 +220,7 @@ function collectReferencedAttachmentIdsFromState(state: DraftStoreState): Set<st
   const modalRecord = state.createModalDraft;
   if (modalRecord?.lifecycle === "active" && isCanonicalDraftInput(modalRecord.input)) {
     for (const attachment of modalRecord.input.attachments) {
-      if (attachment.kind === "image") {
+      if (attachment.kind === "image" || attachment.kind === "file") {
         referencedIds.add(attachment.metadata.id);
       }
     }
@@ -314,7 +314,7 @@ function collectQueuedMessageAttachmentIds(
   for (const queue of session.queuedMessages.values()) {
     for (const queuedMessage of queue) {
       for (const attachment of queuedMessage.attachments) {
-        if (attachment.kind === "image") {
+        if (attachment.kind === "image" || attachment.kind === "file") {
           referencedIds.add(attachment.metadata.id);
         }
       }

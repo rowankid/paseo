@@ -52,7 +52,8 @@ import { derivePendingPermissionKey, normalizeAgentSnapshot } from "@/utils/agen
 import { resolveProjectPlacement } from "@/utils/project-placement";
 import { buildDraftStoreKey } from "@/stores/draft-keys";
 import type { AttachmentMetadata } from "@/attachments/types";
-import { splitComposerAttachmentsForSubmit } from "@/components/composer-attachments";
+import { encodeFileAttachmentsForUpload } from "@/attachments/service";
+import { resolveComposerAttachmentsForSubmit } from "@/components/composer-attachments";
 import { reconcilePreviousAgentStatuses } from "@/contexts/session-status-tracking";
 import { patchWorkspaceScripts } from "@/contexts/session-workspace-scripts";
 import {
@@ -654,12 +655,15 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
         if (queue && queue.length > 0) {
           const [next, ...rest] = queue;
           if (sendAgentMessageRef.current) {
-            const wirePayload = splitComposerAttachmentsForSubmit(next.attachments);
-            void sendAgentMessageRef.current(
-              agent.id,
-              next.text,
-              wirePayload.images,
-              wirePayload.attachments,
+            void resolveComposerAttachmentsForSubmit(next.attachments, {
+              encodeFiles: encodeFileAttachmentsForUpload,
+            }).then((wirePayload) =>
+              sendAgentMessageRef.current?.(
+                agent.id,
+                next.text,
+                wirePayload.images,
+                wirePayload.attachments,
+              ),
             );
           }
           setQueuedMessages(serverId, (prev) => {

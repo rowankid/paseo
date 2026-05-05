@@ -27,6 +27,9 @@ export function renderPromptAttachmentAsText(attachment: AgentAttachment): strin
     case "text": {
       return attachment.text;
     }
+    case "file_upload": {
+      return `Attached file: ${attachment.fileName?.trim() || "file"} (${attachment.mimeType})`;
+    }
     case "review": {
       const lines = [`Paseo review attachment (${attachment.mode})`, `CWD: ${attachment.cwd}`];
       if (attachment.baseRef) {
