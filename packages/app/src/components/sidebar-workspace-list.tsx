@@ -7,6 +7,7 @@ import {
   ActivityIndicator,
   StatusBar,
   ScrollView,
+  Animated,
   type GestureResponderEvent,
   type PressableStateCallbackType,
   type ViewStyle,
@@ -23,9 +24,11 @@ import {
   type MutableRefObject,
   type Ref,
 } from "react";
+import equal from "fast-deep-equal";
 import { router, usePathname, type Href } from "expo-router";
+import { useStoreWithEqualityFn } from "zustand/traditional";
 import { navigateToWorkspace } from "@/hooks/use-workspace-navigation";
-import { StyleSheet, withUnistyles } from "react-native-unistyles";
+import { StyleSheet, useUnistyles, withUnistyles } from "react-native-unistyles";
 import type { Theme } from "@/styles/theme";
 import { type GestureType } from "react-native-gesture-handler";
 import * as Clipboard from "expo-clipboard";
@@ -59,6 +62,7 @@ import {
   buildProjectSettingsRoute,
   parseHostWorkspaceRouteFromPathname,
 } from "@/utils/host-routes";
+import { getProviderIcon } from "@/components/provider-icons";
 import {
   createSidebarWorkspaceEntry,
   type SidebarProjectEntry,
@@ -81,6 +85,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { SyncedLoader } from "@/components/synced-loader";
 import { useToast } from "@/contexts/toast-context";
+import { useArchiveAgent } from "@/hooks/use-archive-agent";
 import { useCheckoutGitActionsStore } from "@/stores/checkout-git-actions-store";
 import { hasVisibleOrderChanged, mergeWithRemainder } from "@/utils/sidebar-reorder";
 import { decideLongPressMove } from "@/utils/sidebar-gesture-arbitration";
@@ -114,9 +119,15 @@ import {
   resolveWorkspaceMapKeyByIdentity,
   resolveWorkspaceExecutionDirectory,
 } from "@/utils/workspace-execution";
+import { prepareWorkspaceTab } from "@/utils/workspace-navigation";
 import { WorkspaceHoverCard } from "@/components/workspace-hover-card";
 import { GitHubIcon } from "@/components/icons/github-icon";
 import { isWeb as platformIsWeb, isNative as platformIsNative } from "@/constants/platform";
+import { formatTimeAgo } from "@/utils/time";
+import {
+  buildSidebarCodexSessionsForWorkspace,
+  type SidebarCodexSession,
+} from "@/utils/sidebar-codex-sessions";
 
 function toProjectIconDataUri(icon: { mimeType: string; data: string } | null): string | null {
   if (!icon) {
@@ -288,6 +299,27 @@ function useSidebarWorkspaceEntry(
   );
 
   return useWorkspaceFields(serverId, workspaceId, projectWorkspaceEntry);
+}
+
+function useWorkspaceCodexSessions(
+  serverId: string | null,
+  workspaceId: string | null,
+): SidebarCodexSession[] {
+  const workspaceDirectory = useWorkspaceFields(
+    serverId,
+    workspaceId,
+    (workspace) => workspace.workspaceDirectory,
+  );
+
+  return useStoreWithEqualityFn(
+    useSessionStore,
+    (state) =>
+      buildSidebarCodexSessionsForWorkspace({
+        agents: serverId ? state.sessions[serverId]?.agents?.values() : null,
+        workspaceDirectory,
+      }),
+    equal,
+  );
 }
 
 export function PrBadge({ hint }: { hint: PrHint }) {
@@ -1851,45 +1883,59 @@ function FlattenedProjectRow({
 
   if (project.projectKind === "directory") {
     return (
-      <NonGitProjectRowWithMenu
+      <>
+        <NonGitProjectRowWithMenu
+          project={project}
+          displayName={displayName}
+          iconDataUri={iconDataUri}
+          workspace={workspace}
+          selected={selected}
+          onPress={onPress}
+          shortcutNumber={shortcutNumber}
+          showShortcutBadge={showShortcutBadge}
+          drag={drag}
+          isDragging={isDragging}
+          dragHandleProps={dragHandleProps}
+        />
+        <SidebarCodexSessionRows
+          serverId={serverId}
+          workspaceId={workspace.workspaceId}
+          onWorkspacePress={onWorkspacePress}
+        />
+      </>
+    );
+  }
+
+  return (
+    <>
+      <ProjectHeaderRow
         project={project}
         displayName={displayName}
         iconDataUri={iconDataUri}
         workspace={workspace}
         selected={selected}
+        chevron={rowModel.chevron}
         onPress={onPress}
+        serverId={serverId}
+        canCreateWorktree={rowModel.trailingAction === "new_worktree"}
+        isProjectActive={isProjectActive}
+        onWorkspacePress={onWorkspacePress}
+        onWorktreeCreated={onWorktreeCreated}
         shortcutNumber={shortcutNumber}
         showShortcutBadge={showShortcutBadge}
         drag={drag}
         isDragging={isDragging}
+        menuController={null}
+        onRemoveProject={onRemoveProject}
+        removeProjectStatus={removeProjectStatus}
         dragHandleProps={dragHandleProps}
       />
-    );
-  }
-
-  return (
-    <ProjectHeaderRow
-      project={project}
-      displayName={displayName}
-      iconDataUri={iconDataUri}
-      workspace={workspace}
-      selected={selected}
-      chevron={rowModel.chevron}
-      onPress={onPress}
-      serverId={serverId}
-      canCreateWorktree={rowModel.trailingAction === "new_worktree"}
-      isProjectActive={isProjectActive}
-      onWorkspacePress={onWorkspacePress}
-      onWorktreeCreated={onWorktreeCreated}
-      shortcutNumber={shortcutNumber}
-      showShortcutBadge={showShortcutBadge}
-      drag={drag}
-      isDragging={isDragging}
-      menuController={null}
-      onRemoveProject={onRemoveProject}
-      removeProjectStatus={removeProjectStatus}
-      dragHandleProps={dragHandleProps}
-    />
+      <SidebarCodexSessionRows
+        serverId={serverId}
+        workspaceId={workspace.workspaceId}
+        onWorkspacePress={onWorkspacePress}
+      />
+    </>
   );
 }
 
@@ -1942,7 +1988,213 @@ function WorkspaceRowItem({
       drag={drag ?? noop}
       isDragging={isDragging}
       dragHandleProps={dragHandleProps}
+      onWorkspacePress={onWorkspacePress}
     />
+  );
+}
+
+function formatCodexSessionStatus(status: SidebarCodexSession["status"]): string {
+  switch (status) {
+    case "initializing":
+      return "Starting";
+    case "idle":
+      return "Idle";
+    case "running":
+      return "Running";
+    case "error":
+      return "Error";
+    case "closed":
+      return "Closed";
+    default:
+      return status;
+  }
+}
+
+function SidebarCodexSessionRow({
+  serverId,
+  workspaceId,
+  session,
+  onWorkspacePress,
+}: {
+  serverId: string;
+  workspaceId: string;
+  session: SidebarCodexSession;
+  onWorkspacePress?: () => void;
+}) {
+  const { theme } = useUnistyles();
+  const toast = useToast();
+  const { archiveAgent, isArchivingAgent } = useArchiveAgent();
+  const [isHovered, setIsHovered] = useState(false);
+  const [isConfirmingArchive, setIsConfirmingArchive] = useState(false);
+  const archiveConfirmProgress = useRef(new Animated.Value(0)).current;
+  const ProviderIcon = getProviderIcon("codex");
+  const timeAgo = formatTimeAgo(session.lastActivityAt);
+  const statusLabel = formatCodexSessionStatus(session.status);
+  const isArchiving = isArchivingAgent({ serverId, agentId: session.id });
+  const showArchiveAction =
+    isHovered || isConfirmingArchive || isArchiving || platformIsNative || platformIsWeb;
+
+  const handlePress = useCallback(() => {
+    onWorkspacePress?.();
+    const route = prepareWorkspaceTab({
+      serverId,
+      workspaceId,
+      target: { kind: "agent", agentId: session.id },
+      pin: false,
+    });
+    router.navigate(route as Href);
+  }, [onWorkspacePress, serverId, session.id, workspaceId]);
+
+  useEffect(() => {
+    Animated.timing(archiveConfirmProgress, {
+      toValue: isConfirmingArchive ? 1 : 0,
+      duration: 140,
+      useNativeDriver: false,
+    }).start();
+  }, [archiveConfirmProgress, isConfirmingArchive]);
+
+  useEffect(() => {
+    if (!isConfirmingArchive) {
+      return undefined;
+    }
+    const timeout = setTimeout(() => {
+      setIsConfirmingArchive(false);
+    }, 3000);
+    return () => clearTimeout(timeout);
+  }, [isConfirmingArchive]);
+
+  useEffect(() => {
+    setIsConfirmingArchive(false);
+  }, [session.id]);
+
+  const handleHoverIn = useCallback(() => setIsHovered(true), []);
+  const handleHoverOut = useCallback(() => setIsHovered(false), []);
+
+  const handleArchivePress = useCallback(
+    (event: GestureResponderEvent) => {
+      event.stopPropagation?.();
+      if (isArchiving) {
+        return;
+      }
+      if (!isConfirmingArchive) {
+        setIsConfirmingArchive(true);
+        return;
+      }
+      setIsConfirmingArchive(false);
+      void archiveAgent({ serverId, agentId: session.id }).catch((error) => {
+        toast.error(error instanceof Error ? error.message : "Failed to archive session");
+      });
+    },
+    [archiveAgent, isArchiving, isConfirmingArchive, serverId, session.id, toast],
+  );
+
+  const handleArchivePressIn = useCallback((event: GestureResponderEvent) => {
+    event.stopPropagation?.();
+  }, []);
+
+  const rowStyle = useCallback(
+    ({ pressed }: PressableStateCallbackType) => [
+      styles.codexSessionRow,
+      isHovered && styles.codexSessionRowHovered,
+      pressed && styles.codexSessionRowPressed,
+    ],
+    [isHovered],
+  );
+
+  const archiveButtonStyle = useCallback(
+    ({ pressed, hovered = false }: PressableStateCallbackType & { hovered?: boolean }) => [
+      styles.codexSessionArchiveButton,
+      isConfirmingArchive && styles.codexSessionArchiveButtonConfirming,
+      (pressed || hovered) && !isConfirmingArchive && styles.codexSessionArchiveButtonHovered,
+      isArchiving && styles.codexSessionArchiveButtonDisabled,
+    ],
+    [isArchiving, isConfirmingArchive],
+  );
+
+  const archiveActionStyle = useMemo(
+    () => [
+      styles.codexSessionArchiveAction,
+      !showArchiveAction && styles.codexSessionArchiveActionHidden,
+      {
+        width: archiveConfirmProgress.interpolate({
+          inputRange: [0, 1],
+          outputRange: [28, 72],
+        }),
+      },
+    ],
+    [archiveConfirmProgress, showArchiveAction],
+  );
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      style={rowStyle}
+      onPress={handlePress}
+      onHoverIn={handleHoverIn}
+      onHoverOut={handleHoverOut}
+      testID={`sidebar-codex-session-${serverId}-${session.id}`}
+    >
+      <View style={styles.codexSessionIconSlot}>
+        <ProviderIcon size={14} color={theme.colors.foregroundMuted} />
+      </View>
+      <View style={styles.codexSessionTextBlock}>
+        <Text style={styles.codexSessionTitle} numberOfLines={1}>
+          {session.title || "Codex session"}
+        </Text>
+        <Text style={styles.codexSessionMeta} numberOfLines={1}>
+          {statusLabel} · {timeAgo}
+        </Text>
+      </View>
+      <Animated.View style={archiveActionStyle}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={isConfirmingArchive ? "Confirm archive session" : "Archive session"}
+          disabled={isArchiving}
+          hitSlop={6}
+          onPressIn={handleArchivePressIn}
+          onPress={handleArchivePress}
+          style={archiveButtonStyle}
+          testID={`sidebar-codex-session-archive-${serverId}-${session.id}`}
+        >
+          {isConfirmingArchive ? (
+            <Text style={styles.codexSessionArchiveConfirmText}>
+              {isArchiving ? "..." : "Archive"}
+            </Text>
+          ) : (
+            <ThemedArchive size={13} uniProps={foregroundMutedColorMapping} />
+          )}
+        </Pressable>
+      </Animated.View>
+    </Pressable>
+  );
+}
+
+function SidebarCodexSessionRows({
+  serverId,
+  workspaceId,
+  onWorkspacePress,
+}: {
+  serverId: string | null;
+  workspaceId: string;
+  onWorkspacePress?: () => void;
+}) {
+  const sessions = useWorkspaceCodexSessions(serverId, workspaceId);
+  if (!serverId || sessions.length === 0) {
+    return null;
+  }
+
+  return (
+    <View style={styles.codexSessionList}>
+      {sessions.map((session) => (
+        <SidebarCodexSessionRow
+          key={session.id}
+          serverId={serverId}
+          workspaceId={workspaceId}
+          session={session}
+          onWorkspacePress={onWorkspacePress}
+        />
+      ))}
+    </View>
   );
 }
 
@@ -1957,6 +2209,7 @@ function WorkspaceRow({
   canCopyBranchName,
   isCreating = false,
   selectionEnabled,
+  onWorkspacePress,
 }: {
   workspace: SidebarWorkspaceEntry;
   shortcutNumber: number | null;
@@ -1968,6 +2221,7 @@ function WorkspaceRow({
   canCopyBranchName: boolean;
   isCreating?: boolean;
   selectionEnabled: boolean;
+  onWorkspacePress?: () => void;
 }) {
   const hydratedWorkspace = useSidebarWorkspaceEntry(workspace.serverId, workspace.workspaceId);
   const selected = useIsNavigationWorkspaceSelected({
@@ -1981,18 +2235,25 @@ function WorkspaceRow({
   }
 
   return (
-    <WorkspaceRowWithMenu
-      workspace={hydratedWorkspace}
-      selected={selected}
-      shortcutNumber={shortcutNumber}
-      showShortcutBadge={showShortcutBadge}
-      onPress={onPress}
-      drag={drag}
-      isDragging={isDragging}
-      dragHandleProps={dragHandleProps}
-      canCopyBranchName={canCopyBranchName}
-      isCreating={isCreating}
-    />
+    <>
+      <WorkspaceRowWithMenu
+        workspace={hydratedWorkspace}
+        selected={selected}
+        shortcutNumber={shortcutNumber}
+        showShortcutBadge={showShortcutBadge}
+        onPress={onPress}
+        drag={drag}
+        isDragging={isDragging}
+        dragHandleProps={dragHandleProps}
+        canCopyBranchName={canCopyBranchName}
+        isCreating={isCreating}
+      />
+      <SidebarCodexSessionRows
+        serverId={workspace.serverId}
+        workspaceId={workspace.workspaceId}
+        onWorkspacePress={onWorkspacePress}
+      />
+    </>
   );
 }
 
@@ -2602,6 +2863,84 @@ const styles = StyleSheet.create((theme) => ({
     marginBottom: theme.spacing[1],
   },
   workspaceListContainer: {},
+  codexSessionList: {
+    marginTop: -theme.spacing[1],
+    marginBottom: theme.spacing[1],
+    paddingLeft: theme.spacing[3] + theme.spacing[3] + WORKSPACE_STATUS_DOT_WIDTH,
+    paddingRight: theme.spacing[2],
+    gap: 1,
+  },
+  codexSessionRow: {
+    minHeight: 28,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+    paddingVertical: theme.spacing[1],
+    paddingLeft: theme.spacing[2],
+    paddingRight: theme.spacing[2],
+    borderRadius: theme.borderRadius.md,
+  },
+  codexSessionRowHovered: {
+    backgroundColor: theme.colors.surfaceSidebarHover,
+  },
+  codexSessionRowPressed: {
+    backgroundColor: theme.colors.surface2,
+  },
+  codexSessionIconSlot: {
+    width: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+    opacity: 0.82,
+  },
+  codexSessionTextBlock: {
+    flex: 1,
+    minWidth: 0,
+  },
+  codexSessionTitle: {
+    color: theme.colors.foreground,
+    fontSize: theme.fontSize.xs,
+    fontWeight: "400",
+    opacity: 0.78,
+    lineHeight: 16,
+  },
+  codexSessionMeta: {
+    color: theme.colors.foregroundMuted,
+    fontSize: theme.fontSize.xs,
+    lineHeight: 14,
+  },
+  codexSessionArchiveAction: {
+    height: 24,
+    overflow: "hidden",
+    flexShrink: 0,
+  },
+  codexSessionArchiveActionHidden: {
+    opacity: 0,
+  },
+  codexSessionArchiveButton: {
+    height: 24,
+    minWidth: 28,
+    paddingHorizontal: theme.spacing[2],
+    borderRadius: theme.borderRadius.md,
+    alignItems: "center",
+    justifyContent: "center",
+    alignSelf: "stretch",
+    backgroundColor: "transparent",
+  },
+  codexSessionArchiveButtonHovered: {
+    backgroundColor: theme.colors.surface2,
+  },
+  codexSessionArchiveButtonConfirming: {
+    backgroundColor: theme.colors.destructive,
+  },
+  codexSessionArchiveButtonDisabled: {
+    opacity: theme.opacity[50],
+  },
+  codexSessionArchiveConfirmText: {
+    color: theme.colors.palette.white,
+    fontSize: theme.fontSize.xs,
+    fontWeight: theme.fontWeight.medium,
+  },
   emptyContainer: {
     marginHorizontal: theme.spacing[2],
     marginTop: theme.spacing[4],

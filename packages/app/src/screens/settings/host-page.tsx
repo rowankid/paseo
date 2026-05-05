@@ -1,7 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Pressable, Text, TextInput, View } from "react-native";
+import { router } from "expo-router";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
-import { ChevronRight, Globe, Monitor, Pencil, RotateCw, Trash2 } from "lucide-react-native";
+import {
+  Archive,
+  ChevronRight,
+  Globe,
+  Monitor,
+  Pencil,
+  RotateCw,
+  Trash2,
+} from "lucide-react-native";
 import type { HostConnection, HostProfile } from "@/types/host-connection";
 import {
   getHostRuntimeStore,
@@ -25,6 +34,7 @@ import { SettingsSection } from "@/screens/settings/settings-section";
 import { ProvidersSection } from "@/screens/settings/providers-section";
 import { PairDeviceModal } from "@/desktop/components/pair-device-modal";
 import { LocalDaemonSection } from "@/desktop/components/desktop-updates-section";
+import { buildSettingsHostArchivedRoute } from "@/utils/host-routes";
 
 const RESTART_CONFIRMATION_MESSAGE =
   "This will restart the daemon. Agents running on it will keep going; the app will reconnect automatically.";
@@ -164,6 +174,8 @@ export function HostPage({ serverId, onHostRemoved }: HostPageProps) {
       <DaemonSection host={host} isLocalDaemon={isLocalDaemon} />
 
       <ProvidersSection serverId={serverId} />
+
+      <ConversationsSection serverId={serverId} />
 
       <RemoveHostSection host={host} onRemoved={onHostRemoved} />
     </View>
@@ -661,6 +673,41 @@ function PairDeviceRow() {
   );
 }
 
+function ConversationsSection({ serverId }: { serverId: string }) {
+  const { theme } = useUnistyles();
+  const handleOpenArchived = useCallback(() => {
+    router.navigate(buildSettingsHostArchivedRoute(serverId));
+  }, [serverId]);
+
+  const archiveIcon = useMemo(
+    () => <Archive size={theme.iconSize.sm} color={theme.colors.foregroundMuted} />,
+    [theme.iconSize.sm, theme.colors.foregroundMuted],
+  );
+
+  return (
+    <SettingsSection title="Conversations">
+      <View style={settingsStyles.card}>
+        <Pressable
+          style={settingsStyles.row}
+          onPress={handleOpenArchived}
+          accessibilityRole="button"
+          accessibilityLabel="Archived conversations"
+          testID="host-page-archived-conversations-row"
+        >
+          <View style={styles.rowTitleWithIcon}>
+            {archiveIcon}
+            <View style={settingsStyles.rowContent}>
+              <Text style={settingsStyles.rowTitle}>Archived conversations</Text>
+              <Text style={settingsStyles.rowHint}>Review conversations archived on this host</Text>
+            </View>
+          </View>
+          <ChevronRight size={theme.iconSize.sm} color={theme.colors.foregroundMuted} />
+        </Pressable>
+      </View>
+    </SettingsSection>
+  );
+}
+
 function RemoveHostSection({ host, onRemoved }: { host: HostProfile; onRemoved?: () => void }) {
   const { theme } = useUnistyles();
   const { removeHost } = useHostMutations();
@@ -850,6 +897,14 @@ const styles = StyleSheet.create((theme) => ({
     flexDirection: "row",
     alignItems: "center",
     gap: theme.spacing[2],
+  },
+  rowTitleWithIcon: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[3],
+    marginRight: theme.spacing[3],
   },
 }));
 

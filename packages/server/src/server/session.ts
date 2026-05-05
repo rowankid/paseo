@@ -2,6 +2,7 @@ import equal from "fast-deep-equal";
 import { v4 as uuidv4 } from "uuid";
 import { TTLCache } from "@isaacs/ttlcache";
 import pMemoize from "p-memoize";
+import { createHash } from "node:crypto";
 import { realpathSync } from "node:fs";
 import type { FSWatcher } from "node:fs";
 import { basename, resolve, sep } from "path";
@@ -126,6 +127,7 @@ import type {
   AgentSessionConfig,
   AgentStreamEvent,
   AgentTimelineItem,
+  PersistedAgentDescriptor,
   ProviderSnapshotEntry,
 } from "./agent/agent-sdk-types.js";
 import type { StoredAgentRecord } from "./agent/agent-storage.js";
@@ -284,6 +286,8 @@ type GitMutationRefreshReason =
 const LEGACY_PROVIDER_IDS = new Set(["claude", "codex", "opencode"]);
 const MIN_VERSION_ALL_PROVIDERS = "0.1.45";
 const MIN_VERSION_FLEXIBLE_EDITOR_IDS = "0.1.50";
+const EXTERNAL_CODEX_SESSION_INDEX_LIMIT = 1000;
+const EXTERNAL_CODEX_DEFAULT_MODE_ID = "auto";
 
 function errorToFriendlyMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -300,6 +304,89 @@ function resolveSubscriptionId(
     return requestedSubscriptionId;
   }
   return uuidv4();
+}
+
+function buildDeterministicUuid(seed: string): string {
+  const hex = createHash("sha256").update(seed).digest("hex");
+  const variant = ((Number.parseInt(hex.slice(16, 17), 16) & 0x3) | 0x8).toString(16);
+  return [
+    hex.slice(0, 8),
+    hex.slice(8, 12),
+    `5${hex.slice(13, 16)}`,
+    `${variant}${hex.slice(17, 20)}`,
+    hex.slice(20, 32),
+  ].join("-");
+}
+
+function persistedDescriptorIdentity(descriptor: PersistedAgentDescriptor): string {
+  const nativeHandle =
+    typeof descriptor.persistence.nativeHandle === "string"
+      ? descriptor.persistence.nativeHandle
+      : "";
+  return `${descriptor.provider}:${descriptor.sessionId}:${nativeHandle}`;
+}
+
+function buildExternalCodexStoredAgentRecord(
+  descriptor: PersistedAgentDescriptor,
+): StoredAgentRecord {
+  const parsedActivityAt = descriptor.lastActivityAt.getTime();
+  const activityAt = Number.isNaN(parsedActivityAt) ? new Date(0) : descriptor.lastActivityAt;
+  const timestamp = activityAt.toISOString();
+
+  return {
+    id: buildDeterministicUuid(`external-agent:${persistedDescriptorIdentity(descriptor)}`),
+    provider: descriptor.provider,
+    cwd: descriptor.cwd,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    lastActivityAt: timestamp,
+    lastUserMessageAt: null,
+    title: descriptor.title,
+    labels: {},
+    lastStatus: "closed",
+    lastModeId: EXTERNAL_CODEX_DEFAULT_MODE_ID,
+    config: {
+      modeId: EXTERNAL_CODEX_DEFAULT_MODE_ID,
+      ...(descriptor.title ? { title: descriptor.title } : {}),
+    },
+    runtimeInfo: {
+      provider: descriptor.provider,
+      sessionId: descriptor.sessionId,
+      modeId: EXTERNAL_CODEX_DEFAULT_MODE_ID,
+    },
+    persistence: descriptor.persistence,
+    requiresAttention: false,
+    attentionReason: null,
+    attentionTimestamp: null,
+    archivedAt: null,
+  };
+}
+
+function storedExternalCodexRecordNeedsRefresh(record: StoredAgentRecord): boolean {
+  return (
+    record.provider === "codex" &&
+    record.config?.modeId !== EXTERNAL_CODEX_DEFAULT_MODE_ID &&
+    record.lastModeId !== EXTERNAL_CODEX_DEFAULT_MODE_ID
+  );
+}
+
+function storedRecordMatchesPersistedDescriptor(
+  record: StoredAgentRecord,
+  descriptor: PersistedAgentDescriptor,
+): boolean {
+  if (record.provider !== descriptor.provider) {
+    return false;
+  }
+  const nativeHandle =
+    typeof descriptor.persistence.nativeHandle === "string"
+      ? descriptor.persistence.nativeHandle
+      : null;
+  return (
+    record.persistence?.sessionId === descriptor.sessionId ||
+    record.persistence?.nativeHandle === descriptor.sessionId ||
+    (nativeHandle !== null && record.persistence?.nativeHandle === nativeHandle) ||
+    record.runtimeInfo?.sessionId === descriptor.sessionId
+  );
 }
 
 function diffChangeTypeFor(file: { isNew?: boolean; isDeleted?: boolean }): "A" | "D" | "M" {
@@ -5675,6 +5762,51 @@ export class Session {
   /**
    * Build the current agent list payload (live + persisted), optionally filtered by labels.
    */
+  private async indexExternalCodexPersistedAgentsForWorkspaces(
+    workspaceCwds: Iterable<string>,
+  ): Promise<void> {
+    const normalizedWorkspaceCwds = new Set(
+      Array.from(workspaceCwds, (cwd) => normalizePersistedWorkspaceId(cwd)),
+    );
+    if (normalizedWorkspaceCwds.size === 0) {
+      return;
+    }
+
+    let descriptors: PersistedAgentDescriptor[];
+    try {
+      descriptors = await this.agentManager.listPersistedAgents({
+        provider: "codex",
+        limit: EXTERNAL_CODEX_SESSION_INDEX_LIMIT,
+      });
+    } catch (error) {
+      this.sessionLogger.warn({ err: error }, "Failed to list external Codex sessions");
+      return;
+    }
+
+    const codexDescriptors = descriptors.filter(
+      (descriptor) =>
+        descriptor.provider === "codex" &&
+        normalizedWorkspaceCwds.has(normalizePersistedWorkspaceId(descriptor.cwd)),
+    );
+    if (codexDescriptors.length === 0) {
+      return;
+    }
+
+    const storedRecords = await this.agentStorage.list();
+    const recordsToIndex = codexDescriptors.filter((descriptor) => {
+      const existingRecord = storedRecords.find((record) =>
+        storedRecordMatchesPersistedDescriptor(record, descriptor),
+      );
+      return !existingRecord || storedExternalCodexRecordNeedsRefresh(existingRecord);
+    });
+
+    await Promise.all(
+      recordsToIndex.map((descriptor) =>
+        this.agentStorage.upsert(buildExternalCodexStoredAgentRecord(descriptor)),
+      ),
+    );
+  }
+
   private async listAgentPayloads(filter?: {
     labels?: Record<string, string>;
     includeUnavailablePersisted?: boolean;
@@ -5887,12 +6019,21 @@ export class Session {
     const scope = request.type === "fetch_agents_request" ? request.scope : undefined;
     const sort = this.agentsPager.normalizeSort(request.sort);
 
+    const activePlacementsByCwd =
+      scope === "active" ? await this.buildActiveProjectPlacementsByWorkspaceCwd() : null;
+    const indexablePlacementsByCwd =
+      activePlacementsByCwd ??
+      (request.type === "fetch_agent_history_request"
+        ? await this.buildActiveProjectPlacementsByWorkspaceCwd()
+        : null);
+    if (indexablePlacementsByCwd) {
+      await this.indexExternalCodexPersistedAgentsForWorkspaces(indexablePlacementsByCwd.keys());
+    }
+
     let agents = await this.listAgentPayloads({
       labels: filter?.labels,
       includeUnavailablePersisted: request.type === "fetch_agent_history_request",
     });
-    const activePlacementsByCwd =
-      scope === "active" ? await this.buildActiveProjectPlacementsByWorkspaceCwd() : null;
     if (activePlacementsByCwd) {
       agents = agents.filter(
         (agent) =>

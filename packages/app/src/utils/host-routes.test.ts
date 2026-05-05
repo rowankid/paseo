@@ -6,6 +6,7 @@ import {
   buildHostWorkspaceRoute,
   buildProjectSettingsRoute,
   buildProjectsSettingsRoute,
+  buildSettingsHostArchivedRoute,
   decodeFilePathFromPathSegment,
   decodeWorkspaceIdFromPathSegment,
   encodeFilePathForPathSegment,
@@ -133,6 +134,18 @@ describe("workspace route parsing", () => {
     const encoded = encodeWorkspaceIdForPathSegment(id);
     expect(encoded).toBe("b64_dGVhbS9zZXR1cDppZCMx");
     expect(decodeWorkspaceIdFromPathSegment(encoded)).toBe("team/setup:id#1");
+  });
+});
+
+describe("host settings routes", () => {
+  it("buildSettingsHostArchivedRoute appends the archived conversations segment", () => {
+    expect(buildSettingsHostArchivedRoute("local")).toBe("/settings/hosts/local/archived");
+  });
+
+  it("buildSettingsHostArchivedRoute encodes host ids as one segment", () => {
+    expect(buildSettingsHostArchivedRoute("relay:team/dev")).toBe(
+      "/settings/hosts/relay%3Ateam%2Fdev/archived",
+    );
   });
 });
 
