@@ -70,12 +70,9 @@ export function resolveStartupRedirectRoute(input: ResolveStartupRedirectInput):
   if (input.pathname !== "/" && input.pathname !== "") {
     return null;
   }
-  if (!input.isWorkspaceSelectionLoaded) {
-    return null;
-  }
-
   if (input.anyOnlineHostServerId) {
     if (
+      input.isWorkspaceSelectionLoaded &&
       input.workspaceSelection &&
       input.workspaceSelection.serverId === input.anyOnlineHostServerId
     ) {
@@ -85,6 +82,10 @@ export function resolveStartupRedirectRoute(input: ResolveStartupRedirectInput):
       );
     }
     return buildHostRootRoute(input.anyOnlineHostServerId);
+  }
+
+  if (!input.isWorkspaceSelectionLoaded && !input.hasGivenUpWaitingForHost) {
+    return null;
   }
 
   if (input.hasGivenUpWaitingForHost) {
