@@ -136,14 +136,14 @@ describe("resolveStartupRedirectRoute", () => {
     ).toBeNull();
   });
 
-  it("waits while the persisted workspace selection has not finished loading", () => {
+  it("does not block an online host while the persisted workspace selection has not finished loading", () => {
     expect(
       resolveStartupRedirectRoute({
         ...baseInput,
         anyOnlineHostServerId: "server-1",
         isWorkspaceSelectionLoaded: false,
       }),
-    ).toBeNull();
+    ).toBe("/h/server-1");
   });
 
   it("waits while no host is online and the give-up timer has not fired", () => {
@@ -219,6 +219,16 @@ describe("resolveStartupRedirectRoute", () => {
       const route = resolveStartupRedirectRoute({
         ...baseInput,
         hasGivenUpWaitingForHost: true,
+      });
+
+      expect(route).toBe(WELCOME_ROUTE);
+    });
+
+    it("redirects to the welcome route even if persisted workspace selection loading is stuck", () => {
+      const route = resolveStartupRedirectRoute({
+        ...baseInput,
+        hasGivenUpWaitingForHost: true,
+        isWorkspaceSelectionLoaded: false,
       });
 
       expect(route).toBe(WELCOME_ROUTE);

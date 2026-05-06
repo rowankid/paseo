@@ -93,15 +93,15 @@ export function resolveStartupRedirectRoute(input: ResolveStartupRedirectInput):
   if (!isIndexPathname(input.pathname)) {
     return null;
   }
-  if (!input.isWorkspaceSelectionLoaded) {
-    return null;
-  }
-
   if (input.anyOnlineHostServerId) {
     if (resolveStartupWorkspaceSelection(input)) {
       return null;
     }
     return buildHostRootRoute(input.anyOnlineHostServerId);
+  }
+
+  if (!input.isWorkspaceSelectionLoaded && !input.hasGivenUpWaitingForHost) {
+    return null;
   }
 
   if (input.hasGivenUpWaitingForHost) {

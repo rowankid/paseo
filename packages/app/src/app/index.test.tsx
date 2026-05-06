@@ -98,6 +98,15 @@ describe("Index route startup navigation", () => {
     expect(redirectMock).not.toHaveBeenCalled();
   });
 
+  it("navigates to the host root when workspace selection loading is stuck", async () => {
+    state.anyOnlineHostServerId = "server-1";
+    state.isWorkspaceSelectionLoaded = false;
+
+    await renderIndex();
+
+    expect(redirectMock).toHaveBeenCalledWith("/h/server-1");
+  });
+
   it("restores the persisted workspace when the online host matches its server id", async () => {
     state.anyOnlineHostServerId = "server-1";
     state.workspaceSelection = { serverId: "server-1", workspaceId: "workspace-a" };
@@ -130,6 +139,18 @@ describe("Index route startup navigation", () => {
   });
 
   it("falls back to welcome when the give-up timer fires with no host online", async () => {
+    state.bootstrapState = {
+      ...state.bootstrapState,
+      hasGivenUpWaitingForHost: true,
+    };
+
+    await renderIndex();
+
+    expect(redirectMock).toHaveBeenCalledWith("/welcome");
+  });
+
+  it("falls back to welcome when workspace selection loading is stuck after give-up", async () => {
+    state.isWorkspaceSelectionLoaded = false;
     state.bootstrapState = {
       ...state.bootstrapState,
       hasGivenUpWaitingForHost: true,
