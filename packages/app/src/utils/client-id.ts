@@ -32,23 +32,35 @@ export async function getOrCreateClientId(): Promise<string> {
     return inFlightClientId;
   }
 
-  inFlightClientId = (async () => {
-    const storedValue = await AsyncStorage.getItem(CLIENT_ID_STORAGE_KEY);
-    const existing = normalizeStoredClientId(storedValue);
-    if (existing) {
-      cachedClientId = existing;
-      return existing;
-    }
-
-    const nextValue = generateClientId();
-    await AsyncStorage.setItem(CLIENT_ID_STORAGE_KEY, nextValue);
-    cachedClientId = nextValue;
-    return nextValue;
-  })();
+  inFlightClientId = resolveClientId();
 
   try {
     return await inFlightClientId;
   } finally {
     inFlightClientId = null;
   }
+}
+
+async function resolveClientId(): Promise<string> {
+  try {
+    const storedValue = await AsyncStorage.getItem(CLIENT_ID_STORAGE_KEY);
+    const existing = normalizeStoredClientId(storedValue);
+    if (existing) {
+      cachedClientId = existing;
+      return existing;
+    }
+  } catch (error) {
+    console.warn("[ClientId] Failed to read persisted client id", error);
+  }
+
+  const nextValue = generateClientId();
+  cachedClientId = nextValue;
+
+  try {
+    await AsyncStorage.setItem(CLIENT_ID_STORAGE_KEY, nextValue);
+  } catch (error) {
+    console.warn("[ClientId] Failed to persist client id; using in-memory id", error);
+  }
+
+  return nextValue;
 }

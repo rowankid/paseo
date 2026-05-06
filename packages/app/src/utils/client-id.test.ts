@@ -42,4 +42,34 @@ describe("client-id", () => {
       "cid_123456781234123412341234567890ab",
     );
   });
+
+  it("uses an in-memory client id when storage read fails", async () => {
+    asyncStorageMock.getItem.mockRejectedValue(new Error("storage unavailable"));
+    asyncStorageMock.setItem.mockResolvedValue();
+    vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue(
+      "abcdefab-cdef-abcd-efab-cdefabcdefab",
+    );
+
+    const mod = await import("./client-id");
+    const key = await mod.getOrCreateClientId();
+
+    expect(key).toBe("cid_abcdefabcdefabcdefabcdefabcdefab");
+    expect(asyncStorageMock.setItem).toHaveBeenCalledWith(
+      "@paseo:client-id-v1",
+      "cid_abcdefabcdefabcdefabcdefabcdefab",
+    );
+  });
+
+  it("still returns an in-memory client id when storage write fails", async () => {
+    asyncStorageMock.getItem.mockResolvedValue(null);
+    asyncStorageMock.setItem.mockRejectedValue(new Error("quota exceeded"));
+    vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue(
+      "fedcbafe-dcba-fedc-bafe-dcbafedcbafe",
+    );
+
+    const mod = await import("./client-id");
+    const key = await mod.getOrCreateClientId();
+
+    expect(key).toBe("cid_fedcbafedcbafedcbafedcbafedcbafe");
+  });
 });
