@@ -254,7 +254,7 @@ export async function writeExplorerFile({
   const filePath = await resolveScopedWritableFilePath({ root, relativePath });
 
   try {
-    const existing = await fs.stat(filePath);
+    const existing = await fs.stat(filePath.resolvedPath);
     if (!existing.isFile()) {
       throw new Error("Requested path is not a file");
     }
@@ -273,10 +273,10 @@ export async function writeExplorerFile({
     }
   }
 
-  await fs.writeFile(filePath, Buffer.from(contentBase64, "base64"));
-  const stats = await fs.stat(filePath);
+  await fs.writeFile(filePath.resolvedPath, Buffer.from(contentBase64, "base64"));
+  const stats = await fs.stat(filePath.resolvedPath);
   return {
-    path: normalizeRelativePath({ root, targetPath: filePath }),
+    path: normalizeRelativePath({ root, targetPath: filePath.requestedPath }),
     size: stats.size,
     modifiedAt: stats.mtime.toISOString(),
   };
@@ -363,21 +363,22 @@ async function resolveScopedWritableFilePath({
 }: {
   root: string;
   relativePath: string;
-}): Promise<string> {
+}): Promise<ScopedPath> {
   const parentPath = await resolveScopedPath({ root, relativePath: path.dirname(relativePath) });
   const parentStats = await fs.stat(parentPath.resolvedPath);
   if (!parentStats.isDirectory()) {
     throw new Error("Requested parent path is not a directory");
   }
-  const targetPath = path.join(parentPath.resolvedPath, path.basename(relativePath));
-  const targetRelative = path.relative(await fs.realpath(path.resolve(root)), targetPath);
+  const targetRequestedPath = path.join(parentPath.requestedPath, path.basename(relativePath));
+  const targetResolvedPath = path.join(parentPath.resolvedPath, path.basename(relativePath));
+  const targetRelative = path.relative(await fs.realpath(path.resolve(root)), targetResolvedPath);
   if (
     targetRelative !== "" &&
     (targetRelative.startsWith("..") || path.isAbsolute(targetRelative))
   ) {
     throw new Error(ACCESS_OUTSIDE_WORKSPACE_MESSAGE);
   }
-  const targetLinkStats = await fs.lstat(targetPath).catch((error: unknown) => {
+  const targetLinkStats = await fs.lstat(targetResolvedPath).catch((error: unknown) => {
     if (isMissingEntryError(error)) {
       return null;
     }
@@ -386,7 +387,10 @@ async function resolveScopedWritableFilePath({
   if (targetLinkStats?.isSymbolicLink()) {
     throw new Error(ACCESS_OUTSIDE_WORKSPACE_MESSAGE);
   }
-  return targetPath;
+  return {
+    requestedPath: targetRequestedPath,
+    resolvedPath: targetResolvedPath,
+  };
 }
 
 async function buildEntryPayload({

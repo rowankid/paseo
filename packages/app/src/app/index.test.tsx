@@ -19,6 +19,7 @@ const { navigateToWorkspaceMock, redirectMock, state } = vi.hoisted(() => {
     } as HostRuntimeBootstrapState,
     anyOnlineHostServerId: null as string | null,
     workspaceSelection: null as ActiveWorkspaceSelection | null,
+    isWorkspaceSelectionLoaded: true,
   };
 
   return {
@@ -69,6 +70,7 @@ describe("Index route startup navigation", () => {
     };
     state.anyOnlineHostServerId = null;
     state.workspaceSelection = null;
+    state.isWorkspaceSelectionLoaded = true;
     navigateToWorkspaceMock.mockReset();
     redirectMock.mockReset();
 
